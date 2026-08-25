@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.1.0 — 2026-08-25
 
 - Add two-way plain-text clipboard sharing between SPICE/X11 and Wayland.
 - Add immediate SPICE display resizing through persistent Hyprland modelines,
