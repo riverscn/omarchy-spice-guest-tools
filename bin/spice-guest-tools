@@ -1,0 +1,300 @@
+#!/usr/bin/env bash
+
+set -u
+
+VERSION=0.1.0
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+project_root=$(cd -- "${script_dir}/.." && pwd)
+
+if [[ -f ${project_root}/libexec/common.sh ]]; then
+  common_source="${project_root}/libexec/common.sh"
+  payload_root=${project_root}
+elif [[ ${script_dir} == /usr/bin && -f /usr/lib/spice-guest-tools/common.sh ]]; then
+  common_source=/usr/lib/spice-guest-tools/common.sh
+  payload_root=/usr/share/spice-guest-tools
+elif [[ -f ${HOME}/.local/lib/spice-guest-tools/common.sh ]]; then
+  common_source="${HOME}/.local/lib/spice-guest-tools/common.sh"
+  payload_root="${XDG_DATA_HOME:-${HOME}/.local/share}/spice-guest-tools"
+else
+  common_source=/usr/lib/spice-guest-tools/common.sh
+  payload_root=/usr/share/spice-guest-tools
+fi
+# The CLI deliberately supports source-tree, user, and system installations.
+# shellcheck disable=SC1090
+source "${common_source}"
+
+config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/spice-guest-tools"
+
+usage() {
+  cat <<'EOF'
+Usage: spice-guest-tools <command>
+
+Commands:
+  install      Configure and enable integration in the current session
+  bootstrap    Idempotently configure the current user (normally automatic)
+  uninstall    Disable integration; pass --purge to remove config and state
+  status       Show bridge services and active backend displays
+  doctor       Check the environment, dependencies, services, and config
+  restart      Restart both bridge services
+  logs         Follow logs from both bridge services and spice-vdagent
+  help         Show this help
+  version      Print the version
+EOF
+}
+
+payload_file() {
+  local relative=$1
+  local candidate="${payload_root}/${relative}"
+  [[ -f ${candidate} ]] || die "installation payload is missing: ${candidate}"
+  printf '%s\n' "${candidate}"
+}
+
+backup_file() {
+  local file=$1 backup_root
+  [[ -f ${file} ]] || return 0
+  mkdir -p -- "$(state_dir)/backups"
+  backup_root=$(mktemp -d "$(state_dir)/backups/$(date +%Y%m%d-%H%M%S).XXXXXX")
+  chmod 700 "${backup_root}"
+  cp -a -- "${file}" "${backup_root}/$(basename -- "${file}")"
+  log "backed up ${file} to ${backup_root}"
+}
+
+services_are_installed() {
+  systemctl --user cat spice-guest-tools-bootstrap.service >/dev/null 2>&1 &&
+    systemctl --user cat spice-clipboard-bridge.service >/dev/null 2>&1 &&
+    systemctl --user cat spice-display-bridge.service >/dev/null 2>&1
+}
+
+write_bootstrap_version() {
+  local directory version_file temporary
+  directory=$(state_dir)
+  version_file="${directory}/bootstrap.version"
+  mkdir -p -- "${directory}"
+  chmod 700 "${directory}"
+  temporary=$(mktemp "${directory}/bootstrap.version.XXXXXX")
+  chmod 600 "${temporary}"
+  printf '%s\n' "${VERSION}" >"${temporary}"
+  mv -f -- "${temporary}" "${version_file}"
+}
+
+configure_current_user() {
+  local backend_snapshot state_root
+
+  mkdir -p -- "${config_dir}"
+  chmod 700 "${config_dir}"
+  if [[ ! -f ${config_dir}/config.toml ]]; then
+    install -m 600 "$(payload_file config/config.toml)" "${config_dir}/config.toml"
+  fi
+  load_config
+  load_backend
+  backend_require_commands || die "required backend tools are missing"
+
+  state_root=$(state_dir)
+  mkdir -p -- "${state_root}"
+  chmod 700 "${state_root}"
+  backend_snapshot=$(mktemp "${state_root}/install-backend.XXXXXX")
+  backend_snapshot_config "${backend_snapshot}"
+  backend_configure "${backend_snapshot}"
+
+  write_bootstrap_version
+  rm -f -- "${backend_snapshot}"
+}
+
+cmd_bootstrap() {
+  [[ $# -eq 0 ]] || die "bootstrap takes no arguments"
+  if ! spice_channel_is_available; then
+    log "SPICE agent channel is unavailable; automatic setup skipped"
+    return 0
+  fi
+  configure_current_user
+  log "automatic setup is ready for the current user"
+}
+
+cmd_install() {
+  local backend_snapshot state_root
+  [[ $# -eq 0 ]] || die "install takes no arguments"
+  require_commands systemctl loginctl spice-vdagent cvt xclip clipnotify wl-copy wl-paste ||
+    die "install the missing dependencies first"
+  services_are_installed ||
+    die "service units are not installed; install the system package or run 'make user-install' for development"
+
+  mkdir -p -- "${config_dir}"
+  rm -f -- "${config_dir}/disabled"
+  state_root=$(state_dir)
+  mkdir -p -- "${state_root}"
+  load_config
+  load_backend
+  backend_snapshot=$(mktemp "${state_root}/install-backend.XXXXXX")
+  backend_snapshot_config "${backend_snapshot}"
+  configure_current_user
+
+  systemctl --user daemon-reload
+  if ! systemctl --user enable --now spice-guest-tools-bootstrap.service \
+    spice-clipboard-bridge.service spice-display-bridge.service ||
+    ! systemctl --user restart spice-clipboard-bridge.service \
+      spice-display-bridge.service; then
+    log "could not start or restart the integration services"
+    backend_restore_config "${backend_snapshot}"
+    return 1
+  fi
+
+  if ! systemctl --user is-active --quiet spice-clipboard-bridge.service ||
+    ! systemctl --user is-active --quiet spice-display-bridge.service; then
+    log "one or more new services are not active"
+    backend_restore_config "${backend_snapshot}"
+    return 1
+  fi
+  rm -f -- "${backend_snapshot}"
+  log "installed for the current user"
+}
+
+cmd_uninstall() {
+  local purge=false
+  if [[ ${1:-} == --purge ]]; then
+    purge=true
+    shift
+  fi
+  [[ $# -eq 0 ]] || die "uninstall only accepts --purge"
+
+  mkdir -p -- "${config_dir}"
+  chmod 700 "${config_dir}"
+  : >"${config_dir}/disabled"
+  chmod 600 "${config_dir}/disabled"
+  systemctl --user disable --now spice-guest-tools-bootstrap.service \
+    spice-clipboard-bridge.service spice-display-bridge.service 2>/dev/null || true
+  load_config
+  load_backend
+  backup_file "$(backend_config_file)"
+  backend_remove_integration
+  systemctl --user daemon-reload
+  backend_reload
+
+  if [[ ${purge} == true ]]; then
+    rm -f -- "${config_dir}/config.toml"
+    rm -f -- "$(state_dir)/display.state" "$(state_dir)/bootstrap.version"
+    rmdir -- "$(state_dir)" 2>/dev/null || true
+  fi
+  log "disabled for the current user"
+}
+
+service_state() {
+  local unit=$1 state
+  state=$(systemctl --user is-active "${unit}" 2>/dev/null || true)
+  printf '%-34s %s\n' "${unit}" "${state:-not-installed}"
+}
+
+cmd_status() {
+  load_config
+  load_backend
+  if active_local_wayland_session_for_user; then
+    printf '%-34s %s\n' "SPICE session ownership" active
+  else
+    printf '%-34s %s\n' "SPICE session ownership" inactive
+  fi
+  service_state spice-vdagent.service
+  service_state spice-guest-tools-bootstrap.service
+  service_state spice-clipboard-bridge.service
+  service_state spice-display-bridge.service
+  printf '\n'
+  backend_status || true
+}
+
+doctor_result=0
+doctor_check() {
+  local description=$1
+  shift
+  if ("$@") >/dev/null 2>&1; then
+    printf 'ok    %s\n' "${description}"
+  else
+    printf 'fail  %s\n' "${description}"
+    doctor_result=1
+  fi
+}
+
+is_wayland() {
+  [[ ${XDG_SESSION_TYPE:-} == wayland || -n ${WAYLAND_DISPLAY:-} ]]
+}
+
+spice_channel_is_available() {
+  test -e "${SPICE_GUEST_TOOLS_CHANNEL:-/dev/virtio-ports/com.redhat.spice.0}"
+}
+
+config_is_valid() {
+  load_config
+}
+
+output_is_detectable() {
+  load_config
+  load_backend
+  backend_detect_any_output
+}
+
+unit_exists() {
+  systemctl --user cat "$1"
+}
+
+unit_active() {
+  systemctl --user is-active "$1"
+}
+
+cmd_doctor() {
+  doctor_result=0
+  doctor_check "Wayland session" is_wayland
+  doctor_check "active local seat0 Wayland owner" active_local_wayland_session_for_user
+  doctor_check "SPICE agent channel" spice_channel_is_available
+
+  local command_name
+  for command_name in spice-vdagent loginctl cvt xclip clipnotify wl-copy wl-paste; do
+    doctor_check "command: ${command_name}" command -v "${command_name}"
+  done
+
+  doctor_check "configuration parses" config_is_valid
+  load_config
+  if load_backend >/dev/null 2>&1; then
+    printf 'ok    integration backend loads\n'
+    printf 'ok    integration backend: %s\n' "${BACKEND_NAME}"
+    doctor_check "backend dependencies" backend_require_commands
+  else
+    printf 'fail  integration backend loads\n'
+    doctor_result=1
+  fi
+  doctor_check "SPICE-managed display is detectable" output_is_detectable
+  doctor_check "bootstrap service is installed" unit_exists spice-guest-tools-bootstrap.service
+  doctor_check "clipboard service is installed" unit_exists spice-clipboard-bridge.service
+  doctor_check "display service is installed" unit_exists spice-display-bridge.service
+  doctor_check "spice-vdagent is active" unit_active spice-vdagent.service
+  doctor_check "automatic bootstrap completed" unit_active spice-guest-tools-bootstrap.service
+  doctor_check "clipboard bridge is active" unit_active spice-clipboard-bridge.service
+  doctor_check "display bridge is active" unit_active spice-display-bridge.service
+  if [[ -n ${SPICE_GUEST_TOOLS_BACKEND_LOADED:-} ]]; then
+    doctor_check "backend config has no errors" backend_config_is_clean
+  fi
+  return "${doctor_result}"
+}
+
+cmd_restart() {
+  systemctl --user restart spice-clipboard-bridge.service spice-display-bridge.service
+  cmd_status
+}
+
+cmd_logs() {
+  exec journalctl --user --follow --output=cat \
+    --unit=spice-clipboard-bridge.service \
+    --unit=spice-display-bridge.service \
+    --unit=spice-vdagent.service
+}
+
+command_name=${1:-help}
+shift || true
+case ${command_name} in
+  install) cmd_install "$@" ;;
+  bootstrap) cmd_bootstrap "$@" ;;
+  uninstall) cmd_uninstall "$@" ;;
+  status) cmd_status "$@" ;;
+  doctor) cmd_doctor "$@" ;;
+  restart) cmd_restart "$@" ;;
+  logs) cmd_logs "$@" ;;
+  version|--version|-V) printf '%s\n' "${VERSION}" ;;
+  help|--help|-h) usage ;;
+  *) usage >&2; die "unknown command: ${command_name}" ;;
+esac

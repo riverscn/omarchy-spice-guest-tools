@@ -1,0 +1,21 @@
+spice-vdagent[100]: Monitors config from guest: 16, 1
+spice-vdagent[100]:     monitor 0, config 2659x1586+0+0
+spice-vdagent[100]: Monitors config after zeroing: 1, 1
+spice-vdagent[100]:     monitor 0, config 2656x1586+0+0
+spice-vdagent[100]: Monitors config from guest: 1, 1
+spice-vdagent[100]:     monitor 0, config 3840x2160+0+0
+spice-vdagent[100]: Monitors config from guest: 16, 1
+spice-vdagent[100]:     monitor 0, config 3024x1688+0+0
+spice-vdagent[100]: Monitors config after zeroing: 1, 1
+spice-vdagent[100]:     monitor 0, config 3024x1688+0+0
+spice-vdagent[100]: Monitors config from guest: 16, 1
+spice-vdagent[100]:     monitor 0, config 2560x1440+0+0
+spice-vdagent[100]:     monitor 1, config 1927x1080+2560+0
+spice-vdagent[100]:     monitor 1, config 1927x1080+2560+0
+spice-vdagent[100]: Monitors config after zeroing: 2, 1
+spice-vdagent[100]:     monitor 0, config 2560x1440+0+0
+spice-vdagent[100]:     monitor 1, config 1920x1080+2560+0
+spice-vdagent[100]: Monitors config from guest: 16, 2
+spice-vdagent[100]:     monitor 0, config 1920x1080+0+0
+spice-vdagent[100]: Monitors config from guest: 1, 1
+spice-vdagent[100]:     monitor 0, config 1111x777+0+0

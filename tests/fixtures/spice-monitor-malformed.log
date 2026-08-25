@@ -1,0 +1,31 @@
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 2, 1
+spice-vdagent[200]:     monitor 0, config 2560x1440+0+0
+spice-vdagent[200]: unrelated diagnostic noise
+spice-vdagent[200]:     monitor 0, config 2560x1440+0+0
+spice-vdagent[200]:     monitor 1, config 1920x1080+2560+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 2, 1
+spice-vdagent[200]:     monitor 0, config 3000x1600+0+0
+spice-vdagent[200]: Monitors config from guest: 1, 1
+spice-vdagent[200]:     monitor 0, config 1280x800+0+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 2, 1
+spice-vdagent[200]:     monitor 1, config 1600x900+2048+0
+spice-vdagent[200]:     monitor 0, config 2048x1152+0+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 2, 1
+spice-vdagent[200]:     monitor 1, config 1920x1080+2560+0
+spice-vdagent[200]:     monitor 2, config 1280x720+4480+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 1, 1
+spice-vdagent[200]:     monitor 0, config 1920x1080+0+0 trailing-garbage
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: many, 1
+spice-vdagent[200]:     monitor 0, config 1366x768+0+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 1, 1
+spice-vdagent[200]:     monitor zero, config 1920x1080+0+0
+spice-vdagent[200]: Monitors config from guest: 16, 1
+spice-vdagent[200]: Monitors config after zeroing: 1, 1
+spice-vdagent[200]:     monitor 0, config 3440x1440+0+0

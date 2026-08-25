@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+set -u
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ -f ${script_dir}/common.sh ]]; then
+  common_source="${script_dir}/common.sh"
+elif [[ ${script_dir} == /usr/bin && -f /usr/lib/spice-guest-tools/common.sh ]]; then
+  common_source=/usr/lib/spice-guest-tools/common.sh
+elif [[ -f ${HOME}/.local/lib/spice-guest-tools/common.sh ]]; then
+  common_source="${HOME}/.local/lib/spice-guest-tools/common.sh"
+else
+  common_source=/usr/lib/spice-guest-tools/common.sh
+fi
+# shellcheck disable=SC1090
+source "${common_source}"
+
+load_config
+[[ ${DISPLAY_ENABLED} == true ]] || exit 0
+load_backend
+require_commands flock journalctl loginctl cvt awk grep || exit 1
+backend_require_commands || exit 1
+backend_integration_is_installed ||
+  die "${BACKEND_NAME} integration is not installed; run spice-guest-tools install"
+
+base_runtime=$(runtime_dir)
+mkdir -p -- "${base_runtime}"
+chmod 700 "${base_runtime}"
+exec 9>"${base_runtime}/display.lock"
+flock -n 9 || exit 0
+
+last_layout=""
+declare -A cached_refresh_rates=()
+work_dir=$(mktemp -d "${base_runtime}/display.XXXXXX")
+events="${work_dir}/events"
+mkfifo "${events}"
+exec 8<>"${events}"
+
+cleanup() {
+  jobs -pr | xargs -r kill 2>/dev/null || true
+  rm -f -- "${events}"
+  rmdir -- "${work_dir}" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+
+watch_spice_requests() {
+  stdbuf -oL journalctl --user --follow --unit=spice-vdagent.service \
+    --output=cat --lines=0 | parse_spice_monitor_stream >"${events}"
+}
+
+apply_layout() {
+  local requested_layout=$1 record monitor_index width height raw_x raw_y
+  local monitor_count=0 record_number=0 output command_output refresh_rate modeline size
+  local -a records=() outputs=()
+  local -A seen_monitor_indexes=()
+  local layout_file
+
+  [[ -n ${requested_layout} && ${requested_layout} != "${last_layout}" ]] || return
+  active_local_wayland_session_for_user || return
+
+  IFS=';' read -r -a records <<<"${requested_layout}"
+  monitor_count=${#records[@]}
+  ((monitor_count >= 1 && monitor_count <= 16)) || return
+  for record in "${records[@]}"; do
+    IFS=',' read -r monitor_index width height raw_x raw_y <<<"${record}"
+    if [[ ! ${monitor_index} =~ ^[0-9]+$ || ! ${width} =~ ^[0-9]+$ ||
+      ! ${height} =~ ^[0-9]+$ || ! ${raw_x} =~ ^-?[0-9]+$ ||
+      ! ${raw_y} =~ ^-?[0-9]+$ ]] ||
+      ((width < 640 || width > 8192 || height < 480 || height > 8192)) ||
+      [[ -n ${seen_monitor_indexes[${monitor_index}]:-} ]]; then
+      log "ignored invalid SPICE monitor layout: ${requested_layout}"
+      return
+    fi
+    seen_monitor_indexes[${monitor_index}]=1
+  done
+  last_layout=${requested_layout}
+
+  mapfile -t outputs < <(backend_detect_outputs "${monitor_count}")
+  if ((${#outputs[@]} != monitor_count)); then
+    last_layout=""
+    return
+  fi
+
+  layout_file=$(mktemp "${work_dir}/layout.XXXXXX")
+  for record in "${records[@]}"; do
+    IFS=',' read -r monitor_index width height raw_x raw_y <<<"${record}"
+    output=${outputs[record_number]:-}
+    if [[ -z ${output} ]]; then
+      log "SPICE monitor ${monitor_index} has no matching backend output"
+      rm -f -- "${layout_file}"
+      last_layout=""
+      return
+    fi
+    if [[ -z ${cached_refresh_rates[${output}]:-} ]]; then
+      cached_refresh_rates[${output}]=$(backend_detect_refresh_rate "${output}")
+      log "using ${cached_refresh_rates[${output}]}Hz from the current ${output} state"
+    fi
+    refresh_rate=${cached_refresh_rates[${output}]}
+    size="${width}x${height}"
+    modeline=$(generate_modeline "${width}" "${height}" "${refresh_rate}")
+    if [[ -z ${modeline} ]]; then
+      log "resize ${size}: could not generate modeline"
+      rm -f -- "${layout_file}"
+      last_layout=""
+      return
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "${monitor_index}" "${output}" "${modeline}" "${raw_x}" "${raw_y}" \
+      >>"${layout_file}"
+    record_number=$((record_number + 1))
+  done
+
+  log "monitor layout request: ${requested_layout}"
+  if command_output=$(backend_apply_monitor_layout "${layout_file}" 2>&1); then
+    write_display_state "${layout_file}"
+    log "${BACKEND_NAME} applied ${monitor_count}-monitor layout atomically: ${command_output}"
+  else
+    log "${BACKEND_NAME} rejected monitor layout: ${command_output}"
+    last_layout=""
+  fi
+  rm -f -- "${layout_file}"
+}
+
+watch_spice_requests &
+
+while IFS= read -r requested_layout <&8; do
+  apply_layout "${requested_layout}"
+done

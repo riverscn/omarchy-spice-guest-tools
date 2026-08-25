@@ -1,0 +1,18 @@
+[Unit]
+Description=Initialize SPICE guest integration for the current desktop user
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionPathExists=/dev/virtio-ports/com.redhat.spice.0
+ConditionPathExists=!%h/.config/spice-guest-tools/disabled
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/bin:/usr/bin:%h/.local/bin
+ExecStart=/usr/bin/env spice-guest-tools bootstrap
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=SPICE dynamic display bridge
+Requires=spice-guest-tools-bootstrap.service
+After=graphical-session.target spice-vdagent.service spice-guest-tools-bootstrap.service
+PartOf=graphical-session.target
+Wants=spice-vdagent.service
+ConditionPathExists=/dev/virtio-ports/com.redhat.spice.0
+ConditionPathExists=!%h/.config/spice-guest-tools/disabled
+ConditionEnvironment=WAYLAND_DISPLAY
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/bin:/usr/bin:%h/.local/bin
+ExecStart=/usr/bin/env spice-display-bridge
+Restart=on-failure
+RestartSec=1
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

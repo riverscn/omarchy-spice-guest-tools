@@ -1,0 +1,37 @@
+# Changelog
+
+## 0.1.0 — Unreleased
+
+- Add two-way plain-text clipboard sharing between SPICE/X11 and Wayland.
+- Add immediate SPICE display resizing through persistent Hyprland modelines,
+  with duplicate requests suppressed and no user-facing timing controls.
+- Parse complete SPICE monitor transactions and map multiple active outputs
+  automatically, and apply their modes and positions in one Hyprland Lua call.
+- Validate independent dual-display resizing without changing either output's
+  scale.
+- Keep display scale exclusively owned by Omarchy's `monitors.lua`.
+- Preserve each output's independent live scale while translating multi-monitor
+  positions; generated runtime and persistent rules never set scale.
+- Derive and cache refresh rate from the current Hyprland output instead of
+  exposing it as user configuration.
+- Apply resize modelines through one runtime monitor update without restarting
+  `spice-vdagent` or reloading the full Hyprland monitor configuration.
+- Add systemd user services, environment diagnostics, and safe user install.
+- Add an idempotent per-user bootstrap service and package-level
+  `graphical-session.target` links for zero-configuration setup on next login.
+- Activate an existing local Wayland session immediately from package
+  install/upgrade hooks via its systemd user manager, without requiring logout
+  or writing user configuration as root.
+- Keep package installation out of user home directories and provide a
+  persistent per-user opt-out through `spice-guest-tools uninstall`.
+- Define the production boundary as system-packaged files with exclusively
+  per-user runtime services, configuration, and state; retain user installation
+  only for development.
+- Gate every clipboard and resize operation on logind's active local Wayland
+  owner for `seat0`, allowing safe logout and fast user switching.
+- Add Arch packaging metadata and isolated shell tests.
+- Split the desktop-independent SPICE core from the `omarchy-hyprland` display
+  backend, with automatic or explicit backend selection.
+- Clarify local system-package installation before AUR publication, document
+  development dependencies and every supported configuration setting, and
+  align the first-release milestone with version 0.1.0.

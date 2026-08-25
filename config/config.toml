@@ -1,0 +1,10 @@
+[integration]
+backend = "auto"
+
+[display]
+enabled = true
+output = "auto"
+
+[clipboard]
+enabled = true
+max_bytes = 104857600

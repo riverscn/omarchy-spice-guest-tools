@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+set -u
+
+name=spice-guest-tools-activate
+
+log() {
+  printf '%s: %s\n' "${name}" "$*" >&2
+}
+
+die() {
+  log "$*"
+  exit 1
+}
+
+action=${1:-}
+case ${action} in
+  activate|upgrade|stop|dry-run) ;;
+  *) die "usage: ${name} <activate|upgrade|stop|dry-run>" ;;
+esac
+
+if [[ ${action} != dry-run && ${EUID} -ne 0 ]]; then
+  die "${action} must run as root from the package lifecycle hook"
+fi
+
+if [[ ${action} == dry-run ]]; then
+  loginctl_command=${SPICE_GUEST_TOOLS_LOGINCTL:-/usr/bin/loginctl}
+  systemctl_command=${SPICE_GUEST_TOOLS_SYSTEMCTL:-/usr/bin/systemctl}
+elif ((EUID == 0)); then
+  loginctl_command=/usr/bin/loginctl
+  systemctl_command=/usr/bin/systemctl
+else
+  loginctl_command=/usr/bin/loginctl
+  systemctl_command=/usr/bin/systemctl
+fi
+
+[[ -x ${loginctl_command} ]] || die "loginctl is unavailable"
+if [[ ${action} != dry-run ]]; then
+  [[ -x ${systemctl_command} ]] || die "systemctl is unavailable"
+fi
+
+sessions=$(${loginctl_command} list-sessions --no-legend 2>/dev/null) ||
+  die "could not enumerate login sessions"
+
+declare -A activated_users=()
+eligible_sessions=0
+failures=0
+
+while read -r session_id _; do
+  [[ ${session_id} =~ ^[A-Za-z0-9._-]+$ ]] || continue
+
+  session_user_id=""
+  session_name=""
+  session_type=""
+  session_class=""
+  session_active=""
+  session_remote=""
+  session_seat=""
+  while IFS='=' read -r property value; do
+    case ${property} in
+      User) session_user_id=${value} ;;
+      Name) session_name=${value} ;;
+      Type) session_type=${value} ;;
+      Class) session_class=${value} ;;
+      Active) session_active=${value} ;;
+      Remote) session_remote=${value} ;;
+      Seat) session_seat=${value} ;;
+    esac
+  done < <(${loginctl_command} show-session "${session_id}" \
+    --property=User --property=Name --property=Type --property=Class \
+    --property=Active --property=Remote --property=Seat 2>/dev/null)
+
+  [[ ${session_user_id} =~ ^[1-9][0-9]*$ ]] || continue
+  [[ ${session_name} =~ ^[A-Za-z_][A-Za-z0-9._-]*[$]?$ ]] || continue
+  [[ ${session_type} == wayland && ${session_class} == user ]] || continue
+  [[ ${session_active} == yes && ${session_remote} == no && ${session_seat} == seat0 ]] || continue
+  [[ -z ${activated_users[${session_name}]+present} ]] || continue
+  activated_users[${session_name}]=true
+  eligible_sessions=$((eligible_sessions + 1))
+
+  if [[ ${action} == dry-run ]]; then
+    printf '%s\n' "${session_name}"
+    continue
+  fi
+
+  user_manager=(
+    "${systemctl_command}"
+    --user
+    --machine="${session_name}@.host"
+    --no-pager
+  )
+  if ! "${user_manager[@]}" daemon-reload; then
+    log "could not reload ${session_name}'s user manager"
+    failures=$((failures + 1))
+    continue
+  fi
+
+  if [[ ${action} == stop ]]; then
+    if ! "${user_manager[@]}" stop spice-display-bridge.service \
+      spice-clipboard-bridge.service spice-guest-tools-bootstrap.service; then
+      log "could not stop integration for ${session_name}"
+      failures=$((failures + 1))
+    fi
+    continue
+  fi
+
+  if ! "${user_manager[@]}" restart spice-guest-tools-bootstrap.service; then
+    log "bootstrap failed for ${session_name}"
+    failures=$((failures + 1))
+    continue
+  fi
+  if ! "${user_manager[@]}" restart spice-clipboard-bridge.service \
+    spice-display-bridge.service; then
+    log "bridge activation failed for ${session_name}"
+    failures=$((failures + 1))
+    continue
+  fi
+  log "activated the current Wayland session for ${session_name}"
+done <<<"${sessions}"
+
+if ((eligible_sessions == 0)); then
+  log "no active local Wayland session; login activation remains available"
+fi
+
+((failures == 0))

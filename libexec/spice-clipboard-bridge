@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+set -u
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ -f ${script_dir}/common.sh ]]; then
+  # Source-tree layout.
+  common_source="${script_dir}/common.sh"
+elif [[ ${script_dir} == /usr/bin && -f /usr/lib/spice-guest-tools/common.sh ]]; then
+  # A system package takes precedence over an older per-user installation.
+  common_source=/usr/lib/spice-guest-tools/common.sh
+elif [[ -f ${HOME}/.local/lib/spice-guest-tools/common.sh ]]; then
+  common_source="${HOME}/.local/lib/spice-guest-tools/common.sh"
+else
+  common_source=/usr/lib/spice-guest-tools/common.sh
+fi
+# shellcheck disable=SC1090
+source "${common_source}"
+
+load_config
+[[ ${CLIPBOARD_ENABLED} == true ]] || exit 0
+require_commands flock loginctl clipnotify xclip wl-copy wl-paste cmp stat || exit 1
+
+base_runtime=$(runtime_dir)
+mkdir -p -- "${base_runtime}"
+chmod 700 "${base_runtime}"
+exec 9>"${base_runtime}/clipboard.lock"
+flock -n 9 || exit 0
+
+work_dir=$(mktemp -d "${base_runtime}/clipboard.XXXXXX")
+events="${work_dir}/events"
+last="${work_dir}/last"
+current="${work_dir}/current"
+mkfifo "${events}"
+exec 8<>"${events}"
+: >"${last}"
+
+cleanup() {
+  jobs -pr | xargs -r kill 2>/dev/null || true
+  rm -f -- "${events}" "${last}" "${current}"
+  rmdir -- "${work_dir}" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+
+within_limit() {
+  local file=$1 bytes
+  bytes=$(stat -c %s "${file}") || return 1
+  if ((bytes > CLIPBOARD_MAX_BYTES)); then
+    log "clipboard item ignored (${bytes} bytes exceeds ${CLIPBOARD_MAX_BYTES})"
+    return 1
+  fi
+}
+
+watch_x11() {
+  while clipnotify; do
+    printf 'x\n' >"${events}"
+  done
+}
+
+watch_wayland() {
+  export SPICE_CLIPBOARD_EVENTS=${events}
+  # Expansion belongs to the watcher shell, which inherits the exported path.
+  # shellcheck disable=SC2016
+  wl-paste --watch sh -c 'printf "w\n" > "$SPICE_CLIPBOARD_EVENTS"'
+}
+
+watch_x11 &
+watch_wayland &
+printf 'x\n' >"${events}" &
+
+while read -r source_name; do
+  active_local_wayland_session_for_user || continue
+  case ${source_name} in
+    x)
+      if xclip -selection clipboard -out >"${current}" 2>/dev/null &&
+        within_limit "${current}" && ! cmp -s "${current}" "${last}"; then
+        cp "${current}" "${last}"
+        wl-copy --type text/plain <"${current}"
+      fi
+      ;;
+    w)
+      if wl-paste --no-newline --type text >"${current}" 2>/dev/null &&
+        within_limit "${current}" && ! cmp -s "${current}" "${last}"; then
+        cp "${current}" "${last}"
+        xclip -selection clipboard -in <"${current}"
+      fi
+      ;;
+  esac
+done <&8

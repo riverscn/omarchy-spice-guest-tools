@@ -1,0 +1,512 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+failures=0
+
+check() {
+  local description=$1
+  shift
+  if "$@"; then
+    printf 'ok - %s\n' "${description}"
+  else
+    printf 'not ok - %s\n' "${description}"
+    failures=$((failures + 1))
+  fi
+}
+
+write_monitors_config() {
+  local destination=$1 scale=${2:-2}
+  printf '%s\n' \
+    'local omarchy_gdk_scale = 2' \
+    "local omarchy_monitor_scale = ${scale}" \
+    'hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))' \
+    'hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })' \
+    >"${destination}"
+}
+
+write_command_stubs() {
+  local destination=$1 systemctl_exit=${2:-0}
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "if [[ \" \$* \" == *' enable --now '* ]]; then exit ${systemctl_exit}; fi" \
+    'exit 0' \
+    >"${destination}/systemctl"
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    "if [[ \$1 == configerrors ]]; then exit 0; fi" \
+    "printf '%s\\n' ok" \
+    >"${destination}/hyprctl"
+  chmod 755 "${destination}/systemctl" "${destination}/hyprctl"
+}
+
+syntax_is_valid() {
+  local file
+  while IFS= read -r file; do
+    bash -n "${file}" || return 1
+  done < <(find "${project_root}/bin" "${project_root}/libexec" "${project_root}/tests" \
+    -type f ! -name '*.log' -print)
+  bash -n "${project_root}/omarchy-spice-guest-tools.install"
+}
+
+parser_emits_complete_host_monitor_layouts() {
+  local actual expected
+  # shellcheck disable=SC1091
+  source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+  actual=$(parse_spice_monitor_stream <"${project_root}/tests/fixtures/spice-monitor.log")
+  expected=$'0,2656,1586,0,0\n0,3024,1688,0,0\n0,2560,1440,0,0;1,1920,1080,2560,0'
+  [[ ${actual} == "${expected}" ]]
+}
+
+parser_rejects_incomplete_and_malformed_layouts() {
+  local actual expected
+  # shellcheck disable=SC1091
+  source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+  actual=$(parse_spice_monitor_stream \
+    <"${project_root}/tests/fixtures/spice-monitor-malformed.log")
+  expected=$'0,2560,1440,0,0;1,1920,1080,2560,0\n0,2048,1152,0,0;1,1600,900,2048,0\n0,3440,1440,0,0'
+  [[ ${actual} == "${expected}" ]]
+}
+
+output_detection_maps_complete_virtual_layout() {
+  (
+    local actual
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+    DISPLAY_OUTPUT=auto
+    hyprctl() {
+      printf '%s\n' '[
+        {"id":2,"name":"Virtual-2","description":"Virtual display","disabled":false},
+        {"id":0,"name":"Virtual-1","description":"Virtual display","disabled":false}
+      ]'
+    }
+    actual=$(backend_detect_outputs 2)
+    [[ ${actual} == $'Virtual-1\nVirtual-2' ]]
+  )
+}
+
+cli_has_expected_help() {
+  local help_text
+  help_text=$("${project_root}/bin/spice-guest-tools" help)
+  [[ ${help_text} == *install* ]]
+  [[ ${help_text} == *doctor* ]]
+  [[ ${help_text} == *uninstall* ]]
+}
+
+config_parses() {
+  local SPICE_GUEST_TOOLS_CONFIG="${project_root}/config/config.toml"
+  # shellcheck disable=SC1091
+  source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+  load_config
+  [[ ${INTEGRATION_BACKEND} == auto ]]
+  [[ ${DISPLAY_OUTPUT} == auto ]]
+  [[ ${CLIPBOARD_MAX_BYTES} == 104857600 ]]
+}
+
+core_is_desktop_agnostic() {
+  ! grep -Eqi 'omarchy|hyprctl|monitors\.lua|hl\.monitor' \
+    "${project_root}/libexec/common.sh" \
+    "${project_root}/libexec/spice-display-bridge" \
+    "${project_root}/libexec/spice-clipboard-bridge"
+}
+
+config_rejects_display_ownership_settings() {
+  local test_home setting
+  test_home=$(mktemp -d /tmp/spice-guest-tools-config.XXXXXX)
+  for setting in 'scale = 2' 'refresh_rate = 60'; do
+    printf '%s\n' '[display]' "${setting}" >"${test_home}/config.toml"
+    if SPICE_GUEST_TOOLS_CONFIG="${test_home}/config.toml" \
+      bash -c 'source "$1"; load_config' _ "${project_root}/libexec/common.sh" \
+        >/dev/null 2>&1; then
+      rm -rf -- "${test_home}"
+      return 1
+    fi
+  done
+  rm -rf -- "${test_home}"
+}
+
+refresh_rate_comes_from_system_state() {
+  (
+    local test_refresh actual
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+    hyprctl() {
+      printf '[{"name":"Virtual-1","refreshRate":%s}]\n' "${test_refresh}"
+    }
+
+    test_refresh=59.968
+    actual=$(backend_detect_refresh_rate Virtual-1)
+    [[ ${actual} == 60 ]]
+    test_refresh=119.88
+    actual=$(backend_detect_refresh_rate Virtual-1)
+    [[ ${actual} == 120 ]]
+  )
+}
+
+modeline_generation_supports_non_60hz_outputs() {
+  local actual
+  # shellcheck disable=SC1091
+  source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+  actual=$(generate_modeline 1280 800 75)
+  [[ ${actual} == 106.50\ 1280\ 1360\ 1488\ 1696\ 800\ 803\ 809\ 838\ -hsync\ +vsync ]]
+}
+
+runtime_monitor_update_applies_complete_layout() {
+  local test_home test_bin call_log modeline_one modeline_two layout_file
+  test_home=$(mktemp -d /tmp/spice-guest-tools-runtime.XXXXXX)
+  test_bin="${test_home}/bin"
+  call_log="${test_home}/hyprctl.call"
+  mkdir -p "${test_bin}"
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'if [[ $1 == -j ]]; then' \
+    '  printf '\''[{"name":"Virtual-1","scale":2,"x":0,"y":0},{"name":"Virtual-2","scale":1,"x":1512,"y":0}]\n'\''' \
+    '  exit 0' \
+    'fi' \
+    'printf '\''%s\n'\'' "$*" >"${HYPR_CALL_LOG}"' \
+    'printf '\''%s\n'\'' ok' \
+    >"${test_bin}/hyprctl"
+  chmod 755 "${test_bin}/hyprctl"
+
+  modeline_one='331.50 3024 3072 3104 3184 1688 1691 1701 1736 +hsync -vsync'
+  modeline_two='138.50 1920 1968 2000 2080 1080 1083 1088 1111 +hsync -vsync'
+  layout_file="${test_home}/layout"
+  printf '0\tVirtual-1\t%s\t0\t0\n1\tVirtual-2\t%s\t3024\t0\n' \
+    "${modeline_one}" "${modeline_two}" >"${layout_file}"
+  (
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+    HYPR_CALL_LOG="${call_log}" PATH="${test_bin}:${PATH}" \
+      backend_apply_monitor_layout "${layout_file}" >/dev/null
+  )
+  if ! grep -Fq -- '-r eval do hl.monitor({' "${call_log}" ||
+    [[ $(grep -Fo 'hl.monitor({' "${call_log}" | wc -l) != 2 ]] ||
+    ! grep -Fq 'output = "Virtual-1"' "${call_log}" ||
+    ! grep -Fq 'output = "Virtual-2"' "${call_log}" ||
+    grep -Fq 'scale =' "${call_log}" ||
+    ! grep -Fq 'position = "1512x0"' "${call_log}"; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+  rm -rf -- "${test_home}"
+}
+
+resize_path_avoids_reload_and_agent_restart() {
+  if grep -Eq 'hyprctl[[:space:]]+reload|systemctl.*spice-vdagent' \
+    "${project_root}/libexec/spice-display-bridge"; then
+    return 1
+  fi
+  grep -Fq 'backend_apply_monitor_layout' "${project_root}/libexec/spice-display-bridge"
+}
+
+resize_path_applies_events_immediately() {
+  local bridge="${project_root}/libexec/spice-display-bridge"
+  if grep -Eq 'DEBOUNCE|debounce|pending_size|read[[:space:]]+-r[[:space:]]+-t' \
+    "${bridge}" "${project_root}/libexec/common.sh" \
+    "${project_root}/config/config.toml"; then
+    return 1
+  fi
+  grep -Fq 'while IFS= read -r requested_layout <&8; do' "${bridge}" || return 1
+  # shellcheck disable=SC2016
+  grep -Fq 'apply_layout "${requested_layout}"' "${bridge}"
+}
+
+managed_monitors_preserve_scale_and_restore_layout() {
+  local test_home actual expected
+  test_home=$(mktemp -d /tmp/spice-guest-tools-lua.XXXXXX)
+  mkdir -p "${test_home}/state/spice-guest-tools"
+  printf '%s\n' \
+    'version=3' \
+    'monitor.0.output=Virtual-1' \
+    'monitor.0.modeline=331.50 3024 3072 3104 3184 1688 1691 1701 1736 +hsync -vsync' \
+    'monitor.0.x=0' \
+    'monitor.0.y=0' \
+    'monitor.1.output=Virtual-2' \
+    'monitor.1.modeline=138.50 1920 1968 2000 2080 1080 1083 1088 1111 +hsync -vsync' \
+    'monitor.1.x=1512' \
+    'monitor.1.y=0' \
+    >"${test_home}/state/spice-guest-tools/display.state"
+  actual=$(HOME="${test_home}" XDG_STATE_HOME="${test_home}/state" \
+    SPICE_MANAGED_MONITOR="${project_root}/backends/omarchy-hyprland/managed-monitor.lua" \
+    lua -e '
+      omarchy_monitor_scale = 3
+      hl = { monitor = function(config)
+        io.write(config.output .. "|" .. config.position .. "|" .. tostring(config.scale) .. "\n")
+      end }
+      dofile(os.getenv("SPICE_MANAGED_MONITOR"))
+    ')
+  expected=$'Virtual-1|0x0|nil\nVirtual-2|1512x0|nil'
+  rm -rf -- "${test_home}"
+  [[ ${actual} == "${expected}" ]]
+}
+
+install_is_idempotent() {
+  local test_home test_bin marker_count managed_scale_count
+  test_home=$(mktemp -d /tmp/spice-guest-tools-install.XXXXXX)
+  test_bin="${test_home}/bin"
+  mkdir -p "${test_bin}" "${test_home}/config/hypr" "${test_home}/state" \
+    "${test_home}/runtime"
+  write_monitors_config "${test_home}/config/hypr/monitors.lua" 3
+  write_command_stubs "${test_bin}"
+  touch "${test_home}/spice-channel"
+
+  HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    SPICE_GUEST_TOOLS_CHANNEL="${test_home}/spice-channel" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" install \
+      >/dev/null 2>&1 || {
+        rm -rf -- "${test_home}"
+        return 1
+      }
+  HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    SPICE_GUEST_TOOLS_CHANNEL="${test_home}/spice-channel" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" install \
+      >/dev/null 2>&1 || {
+        rm -rf -- "${test_home}"
+        return 1
+      }
+
+  marker_count=$(grep -Fc -- '-- BEGIN spice-guest-tools managed mode' \
+    "${test_home}/config/hypr/monitors.lua")
+  managed_scale_count=$(sed -n \
+    '/-- BEGIN spice-guest-tools managed mode/,/-- END spice-guest-tools managed mode/p' \
+    "${test_home}/config/hypr/monitors.lua" | grep -Fc 'scale =' || true)
+  if [[ ${marker_count} != 1 ]] ||
+    [[ ! -f ${test_home}/config/spice-guest-tools/config.toml ]] ||
+    [[ ${managed_scale_count} != 0 ]]; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+
+  HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" uninstall \
+      >/dev/null 2>&1
+  if grep -Fq -- '-- BEGIN spice-guest-tools managed mode' \
+    "${test_home}/config/hypr/monitors.lua" ||
+    [[ ! -f ${test_home}/config/spice-guest-tools/config.toml ]] ||
+    [[ ! -f ${test_home}/config/spice-guest-tools/disabled ]]; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+  rm -rf -- "${test_home}"
+}
+
+bootstrap_is_automatic_and_idempotent() {
+  local test_home test_bin backup_count first_result
+  test_home=$(mktemp -d /tmp/spice-guest-tools-bootstrap.XXXXXX)
+  test_bin="${test_home}/bin"
+  mkdir -p "${test_bin}" "${test_home}/config/hypr" "${test_home}/state" \
+    "${test_home}/runtime"
+  write_monitors_config "${test_home}/config/hypr/monitors.lua" 3
+  write_command_stubs "${test_bin}"
+  touch "${test_home}/spice-channel"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 99' >"${test_bin}/systemctl"
+  chmod 755 "${test_bin}/systemctl"
+
+  HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    SPICE_GUEST_TOOLS_CHANNEL="${test_home}/spice-channel" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" bootstrap \
+      >/dev/null 2>&1 || {
+        rm -rf -- "${test_home}"
+        return 1
+      }
+  first_result="${test_home}/monitors.after-first-bootstrap"
+  cp "${test_home}/config/hypr/monitors.lua" "${first_result}"
+  HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    SPICE_GUEST_TOOLS_CHANNEL="${test_home}/spice-channel" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" bootstrap \
+      >/dev/null 2>&1 || {
+        rm -rf -- "${test_home}"
+        return 1
+      }
+
+  backup_count=$(find "${test_home}/state/spice-guest-tools/backups" \
+    -mindepth 1 -maxdepth 1 -type d | wc -l)
+  if [[ ! -f ${test_home}/config/spice-guest-tools/config.toml ]] ||
+    [[ $(grep -Fc -- '-- BEGIN spice-guest-tools managed mode' \
+      "${test_home}/config/hypr/monitors.lua") != 1 ]] ||
+    [[ $(<"${test_home}/state/spice-guest-tools/bootstrap.version") != 0.1.0 ]] ||
+    [[ ${backup_count} != 1 ]] ||
+    ! cmp -s "${first_result}" "${test_home}/config/hypr/monitors.lua"; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+  rm -rf -- "${test_home}"
+}
+
+activation_helper_filters_graphical_sessions() {
+  local test_home test_loginctl actual
+  test_home=$(mktemp -d /tmp/spice-guest-tools-activation.XXXXXX)
+  test_loginctl="${test_home}/loginctl"
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'case $1 in' \
+    '  list-sessions)' \
+    '    printf '\''%s\n'\'' '\''4 1001 testuser seat0 10 user tty2 no -'\'' '\''5 1001 testuser - 11 manager - no -'\'' '\''6 1002 xuser seat0 12 user tty3 no -'\'' '\''7 1003 remote seat0 13 user tty4 no -'\'' '\''8 1001 testuser seat0 14 user tty5 no -'\'' '\''9 1004 otherseat seat1 15 user tty6 no -'\''' \
+    '    ;;' \
+    '  show-session)' \
+    '    case $2 in' \
+    '      4|8) printf '\''%s\n'\'' User=1001 Name=testuser Remote=no Type=wayland Class=user Active=yes Seat=seat0 ;;' \
+    '      5) printf '\''%s\n'\'' User=1001 Name=testuser Remote=no Type=unspecified Class=manager Active=yes Seat= ;;' \
+    '      6) printf '\''%s\n'\'' User=1002 Name=xuser Remote=no Type=x11 Class=user Active=yes Seat=seat0 ;;' \
+    '      7) printf '\''%s\n'\'' User=1003 Name=remote Remote=yes Type=wayland Class=user Active=yes Seat=seat0 ;;' \
+    '      9) printf '\''%s\n'\'' User=1004 Name=otherseat Remote=no Type=wayland Class=user Active=yes Seat=seat1 ;;' \
+    '    esac' \
+    '    ;;' \
+    'esac' \
+    >"${test_loginctl}"
+  chmod 755 "${test_loginctl}"
+
+  actual=$(SPICE_GUEST_TOOLS_LOGINCTL="${test_loginctl}" \
+    "${project_root}/libexec/activate-active-users" dry-run 2>/dev/null)
+  rm -rf -- "${test_home}"
+  [[ ${actual} == testuser ]]
+}
+
+session_ownership_follows_active_seat0_user() {
+  local test_home test_loginctl
+  test_home=$(mktemp -d /tmp/spice-guest-tools-session.XXXXXX)
+  test_loginctl="${test_home}/loginctl"
+  # shellcheck disable=SC2016
+  printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'case $1 in' \
+    '  list-sessions)' \
+    '    printf '\''%s\n'\'' '\''4 1001 olduser seat0 10 user tty2 no -'\'' '\''8 1002 newuser seat0 11 user tty3 no -'\'' '\''9 1003 otherseat seat1 12 user tty4 no -'\''' \
+    '    ;;' \
+    '  show-session)' \
+    '    case $2 in' \
+    '      4) printf '\''%s\n'\'' User=1001 Remote=no Type=wayland Class=user Active=no Seat=seat0 ;;' \
+    '      8) printf '\''%s\n'\'' User=1002 Remote=no Type=wayland Class=user Active=yes Seat=seat0 ;;' \
+    '      9) printf '\''%s\n'\'' User=1003 Remote=no Type=wayland Class=user Active=yes Seat=seat1 ;;' \
+    '    esac' \
+    '    ;;' \
+    'esac' \
+    >"${test_loginctl}"
+  chmod 755 "${test_loginctl}"
+
+  (
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/common.sh"
+    source "${project_root}/libexec/backends/omarchy-hyprland.sh"
+    if active_local_wayland_session_for_user 1001 "${test_loginctl}"; then
+      exit 1
+    fi
+    active_local_wayland_session_for_user 1002 "${test_loginctl}"
+    if active_local_wayland_session_for_user 1003 "${test_loginctl}"; then
+      exit 1
+    fi
+    grep -Fq 'active_local_wayland_session_for_user' \
+      "${project_root}/libexec/spice-clipboard-bridge"
+    grep -Fq 'active_local_wayland_session_for_user' \
+      "${project_root}/libexec/spice-display-bridge"
+  )
+  local result=$?
+  rm -rf -- "${test_home}"
+  return "${result}"
+}
+
+system_package_preserves_user_runtime_boundary() {
+  local test_root wants unit
+  test_root=$(mktemp -d /tmp/spice-guest-tools-package.XXXXXX)
+  make -s -C "${project_root}" DESTDIR="${test_root}" PREFIX=/usr install || {
+    rm -rf -- "${test_root}"
+    return 1
+  }
+  wants="${test_root}/usr/lib/systemd/user/graphical-session.target.wants"
+  for unit in spice-guest-tools-bootstrap.service spice-clipboard-bridge.service \
+    spice-display-bridge.service; do
+    if [[ $(readlink "${wants}/${unit}") != "../${unit}" ]]; then
+      rm -rf -- "${test_root}"
+      return 1
+    fi
+  done
+  if ! grep -Fq 'Requires=spice-guest-tools-bootstrap.service' \
+      "${test_root}/usr/lib/systemd/user/spice-clipboard-bridge.service" ||
+    ! grep -Fq 'ConditionPathExists=/dev/virtio-ports/com.redhat.spice.0' \
+      "${test_root}/usr/lib/systemd/user/spice-guest-tools-bootstrap.service" ||
+    grep -Rq 'ConditionVirtualization' \
+      "${test_root}/usr/lib/systemd/user" ||
+    ! grep -Fq 'ConditionPathExists=!%h/.config/spice-guest-tools/disabled' \
+      "${test_root}/usr/lib/systemd/user/spice-guest-tools-bootstrap.service" ||
+    [[ ! -x ${test_root}/usr/lib/spice-guest-tools/activate-active-users ]] ||
+    [[ ! -f ${test_root}/usr/lib/spice-guest-tools/backends/omarchy-hyprland.sh ]] ||
+    [[ ! -f ${test_root}/usr/share/spice-guest-tools/backends/omarchy-hyprland/managed-monitor.lua ]] ||
+    ! grep -Fq '/usr/lib/spice-guest-tools/activate-active-users activate' \
+      "${project_root}/omarchy-spice-guest-tools.install" ||
+    ! grep -Fq '/usr/lib/spice-guest-tools/activate-active-users upgrade' \
+      "${project_root}/omarchy-spice-guest-tools.install"; then
+    rm -rf -- "${test_root}"
+    return 1
+  fi
+  if [[ -e ${test_root}/usr/lib/systemd/system ]] ||
+    [[ -e ${test_root}/etc ]] || [[ -e ${test_root}/home ]]; then
+    rm -rf -- "${test_root}"
+    return 1
+  fi
+  rm -rf -- "${test_root}"
+}
+
+failed_install_restores_monitor_config() {
+  local test_home test_bin
+  test_home=$(mktemp -d /tmp/spice-guest-tools-failure.XXXXXX)
+  test_bin="${test_home}/bin"
+  mkdir -p "${test_bin}" "${test_home}/config/hypr" "${test_home}/state" \
+    "${test_home}/runtime"
+  write_monitors_config "${test_home}/config/hypr/monitors.lua"
+  write_command_stubs "${test_bin}" 1
+
+  if HOME="${test_home}" XDG_CONFIG_HOME="${test_home}/config" \
+    XDG_STATE_HOME="${test_home}/state" XDG_RUNTIME_DIR="${test_home}/runtime" \
+    PATH="${test_bin}:${PATH}" "${project_root}/bin/spice-guest-tools" install \
+      >/dev/null 2>&1; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+  if grep -Fq -- '-- BEGIN spice-guest-tools managed mode' \
+    "${test_home}/config/hypr/monitors.lua"; then
+    rm -rf -- "${test_home}"
+    return 1
+  fi
+  rm -rf -- "${test_home}"
+}
+
+check "shell syntax" syntax_is_valid
+check "SPICE parser emits only complete host monitor layouts" parser_emits_complete_host_monitor_layouts
+check "SPICE parser rejects incomplete and malformed layouts" parser_rejects_incomplete_and_malformed_layouts
+check "output detection maps a complete virtual layout" output_detection_maps_complete_virtual_layout
+check "CLI help exposes current commands" cli_has_expected_help
+check "default configuration parses" config_parses
+check "SPICE core is desktop agnostic" core_is_desktop_agnostic
+check "configuration rejects scale and refresh ownership" config_rejects_display_ownership_settings
+check "refresh rate is derived from system state" refresh_rate_comes_from_system_state
+check "modelines support non-60Hz virtual outputs" modeline_generation_supports_non_60hz_outputs
+check "runtime monitor update applies the complete layout" runtime_monitor_update_applies_complete_layout
+check "resize path avoids reload and agent restart" resize_path_avoids_reload_and_agent_restart
+check "resize events are applied immediately without debounce" resize_path_applies_events_immediately
+check "managed monitors preserve scale and restore layout" managed_monitors_preserve_scale_and_restore_layout
+check "install is idempotent and uninstall preserves config" install_is_idempotent
+check "bootstrap configures automatically and idempotently" bootstrap_is_automatic_and_idempotent
+check "package activator selects only active local Wayland users" activation_helper_filters_graphical_sessions
+check "SPICE ownership follows the active seat0 Wayland user" session_ownership_follows_active_seat0_user
+check "system package preserves the per-user runtime boundary" system_package_preserves_user_runtime_boundary
+check "failed install restores the monitor configuration" failed_install_restores_monitor_config
+
+if ((failures > 0)); then
+  printf '%s test(s) failed\n' "${failures}" >&2
+  exit 1
+fi
