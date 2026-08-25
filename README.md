@@ -54,16 +54,20 @@ marked Hyprland monitor block, and allows the two bridge services to start.
 The root package hook never writes to a user's home directory itself.
 
 After installing a package built from the `PKGBUILD`, no manual configuration,
-logout, or reboot is required. Until release archives and AUR metadata are
-published, build and install the system package from a clean source checkout:
+logout, or reboot is required. Until the package is published to the AUR,
+install the release-backed `PKGBUILD` from GitHub:
 
 ```bash
-make dist
+git clone https://github.com/riverscn/omarchy-spice-guest-tools.git
+cd omarchy-spice-guest-tools
 makepkg -si
 ```
 
-The planned AUR installation command, once the package is published, is
-`omarchy pkg aur add omarchy-spice-guest-tools`.
+Once the package is published to the AUR, install it through Omarchy with:
+
+```bash
+omarchy pkg aur add omarchy-spice-guest-tools
+```
 
 If installation occurs without an active local Wayland session, the globally
 attached user units perform the same setup automatically at the next graphical
