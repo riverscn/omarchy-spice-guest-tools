@@ -20,8 +20,8 @@ depends=(
   'wl-clipboard'
   'xclip'
 )
-source=("${pkgname}-${pkgver}.tar.gz")
-sha256sums=('SKIP')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha256sums=('4452b055acb70bf024ec04e7ec13591e84467f4f359f3812d0907177d5f215dc')
 
 package() {
   cd "${srcdir}/${pkgname}-${pkgver}"
