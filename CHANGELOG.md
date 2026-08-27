@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 — 2026-08-27
+
+- Add binary-safe, two-way PNG, JPEG, TIFF, and BMP clipboard forwarding while
+  retaining plain-text support and MIME-aware duplicate suppression.
+- Validate PNG clipboard transport in both directions on a live UTM aarch64
+  guest.
+
 ## 0.1.1 — 2026-08-27
 
 - Keep each output's current scale during live SPICE layout updates.

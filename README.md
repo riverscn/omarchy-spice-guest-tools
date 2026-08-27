@@ -1,9 +1,10 @@
 # Omarchy SPICE Guest Tools
 
-Wayland clipboard sharing and dynamic SPICE display resizing for Omarchy guests
-running Hyprland. The project adapts SPICE's X11-oriented guest agent to the
-native Wayland session without depending on a particular hypervisor or virtual
-machine frontend, and without modifying files under `/usr/share/omarchy`.
+Wayland text and image clipboard sharing plus dynamic SPICE display resizing
+for Omarchy guests running Hyprland. The project adapts SPICE's X11-oriented
+guest agent to the native Wayland session without depending on a particular
+hypervisor or virtual machine frontend, and without modifying files under
+`/usr/share/omarchy`.
 
 Runtime activation is based on the standard SPICE agent channel at
 `/dev/virtio-ports/com.redhat.spice.0`. There is no hypervisor check or
@@ -12,14 +13,14 @@ display-vendor matching.
 ## Status
 
 This repository is an early MVP. UTM with a QEMU aarch64 guest is the currently
-verified host environment, not a runtime requirement. Text
-clipboard sharing, dynamic modelines, transactional multi-monitor layout
-handling, safe installation, and diagnostics are implemented. Single- and
-dual-display resizing are tested on a live UTM aarch64 guest.
+verified host environment, not a runtime requirement. Text and image clipboard
+sharing, dynamic modelines, transactional multi-monitor layout handling, safe
+installation, and diagnostics are implemented. Clipboard images and single-
+and dual-display resizing are tested on a live UTM aarch64 guest.
 
 ## Components
 
-- `spice-clipboard-bridge`: two-way plain-text X11/Wayland clipboard bridge
+- `spice-clipboard-bridge`: two-way text and image X11/Wayland clipboard bridge
 - `spice-display-bridge`: immediate, atomic SPICE monitor-layout translator
 - `spice-guest-tools-bootstrap.service`: idempotent per-user configuration at
   login, implemented by the `spice-guest-tools bootstrap` command
@@ -155,9 +156,10 @@ max_bytes = 104857600
 It currently resolves to `omarchy-hyprland`. An explicit backend name is useful
 when more than one installed backend can handle the active desktop session.
 Set `display.enabled` or `clipboard.enabled` to `false` to disable only that
-bridge. `clipboard.max_bytes` is the maximum accepted plain-text clipboard item
-size in bytes; the default is 100 MiB and the accepted range is 1 byte through
-1 GiB.
+bridge. `clipboard.max_bytes` is the maximum accepted text or image clipboard
+item size in bytes; the default is 100 MiB and the accepted range is 1 byte
+through 1 GiB. Image forwarding accepts PNG, JPEG, TIFF, and BMP MIME types and
+preserves their encoded bytes without conversion.
 
 When the number of active Hyprland outputs matches the SPICE monitor layout,
 outputs are mapped automatically in Hyprland output order without inspecting
@@ -215,7 +217,9 @@ metadata will be added after the SPICE host-environment test matrix is complete.
 
 ## Known limitations
 
-- Clipboard support is text-only.
+- Clipboard support is limited to plain text and PNG, JPEG, TIFF, or BMP image
+  data. File-manager copy/paste and other rich clipboard formats are not
+  supported.
 - Display requests are currently parsed from `spice-vdagent` 0.23.x debug
   logs; other versions have not yet been validated.
 - Runtime resizing requires Hyprland's Lua `eval` control API.

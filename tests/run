@@ -111,8 +111,134 @@ config_parses() {
 core_is_desktop_agnostic() {
   ! grep -Eqi 'omarchy|hyprctl|monitors\.lua|hl\.monitor' \
     "${project_root}/libexec/common.sh" \
+    "${project_root}/libexec/clipboard.sh" \
     "${project_root}/libexec/spice-display-bridge" \
     "${project_root}/libexec/spice-clipboard-bridge"
+}
+
+clipboard_forwards_x11_png_binary_safe() {
+  (
+    local test_root current expected forwarded xclip_data_requests=0
+    test_root=$(mktemp -d /tmp/spice-guest-tools-clipboard-x11.XXXXXX)
+    current="${test_root}/current"
+    expected="${test_root}/expected"
+    forwarded="${test_root}/forwarded"
+    printf '\x89PNG\r\n\x1a\n\x00omarchy\xff' >"${expected}"
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/clipboard.sh"
+    xclip() {
+      if [[ " $* " == *' -target TARGETS -out '* ]]; then
+        printf '%s\n' TARGETS UTF8_STRING image/png
+        return
+      fi
+      xclip_data_requests=$((xclip_data_requests + 1))
+      [[ " $* " == *' -target image/png -out '* ]] || return 1
+      command cp "${expected}" /dev/stdout
+    }
+    wl-copy() {
+      [[ $1 == --type && $2 == image/png ]] || return 1
+      command cp /dev/stdin "${forwarded}"
+    }
+
+    clipboard_read_x11 "${current}" &&
+      [[ ${SPICE_CLIPBOARD_MIME} == image/png ]] &&
+      [[ ${SPICE_CLIPBOARD_X11_TARGET} == image/png ]] &&
+      ((xclip_data_requests == 1)) &&
+      clipboard_write_wayland "${current}" "${SPICE_CLIPBOARD_MIME}" &&
+      cmp -s "${expected}" "${forwarded}"
+    local result=$?
+    rm -rf -- "${test_root}"
+    return "${result}"
+  )
+}
+
+clipboard_forwards_wayland_jpeg_binary_safe() {
+  (
+    local test_root current expected forwarded wl_paste_data_requests=0
+    test_root=$(mktemp -d /tmp/spice-guest-tools-clipboard-wayland.XXXXXX)
+    current="${test_root}/current"
+    expected="${test_root}/expected"
+    forwarded="${test_root}/forwarded"
+    printf '\xff\xd8\xff\xe0\x00guest-image\xff\xd9' >"${expected}"
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/clipboard.sh"
+    wl-paste() {
+      if [[ " $* " == *' --list-types '* ]]; then
+        printf '%s\n' text/plain image/jpeg
+        return
+      fi
+      wl_paste_data_requests=$((wl_paste_data_requests + 1))
+      [[ " $* " == *' --type image/jpeg '* ]] || return 1
+      command cp "${expected}" /dev/stdout
+    }
+    xclip() {
+      [[ " $* " == *' -target image/jpeg -in '* ]] || return 1
+      command cp /dev/stdin "${forwarded}"
+    }
+
+    clipboard_read_wayland "${current}" &&
+      [[ ${SPICE_CLIPBOARD_MIME} == image/jpeg ]] &&
+      [[ ${SPICE_CLIPBOARD_X11_TARGET} == image/jpeg ]] &&
+      ((wl_paste_data_requests == 1)) &&
+      clipboard_write_x11 "${current}" "${SPICE_CLIPBOARD_X11_TARGET}" &&
+      cmp -s "${expected}" "${forwarded}"
+    local result=$?
+    rm -rf -- "${test_root}"
+    return "${result}"
+  )
+}
+
+clipboard_preserves_text_fallback() {
+  (
+    local test_root current expected forwarded xclip_data_requests=0
+    test_root=$(mktemp -d /tmp/spice-guest-tools-clipboard-text.XXXXXX)
+    current="${test_root}/current"
+    expected="${test_root}/expected"
+    forwarded="${test_root}/forwarded"
+    printf '%s' 'plain text survives' >"${expected}"
+    # shellcheck disable=SC1091
+    source "${project_root}/libexec/clipboard.sh"
+    xclip() {
+      if [[ " $* " == *' -target TARGETS -out '* ]]; then
+        printf '%s\n' TARGETS UTF8_STRING
+        return
+      fi
+      xclip_data_requests=$((xclip_data_requests + 1))
+      [[ " $* " == *' -target UTF8_STRING -out '* ]] || return 1
+      command cp "${expected}" /dev/stdout
+    }
+    wl-copy() {
+      [[ $1 == --type && $2 == text/plain ]] || return 1
+      command cp /dev/stdin "${forwarded}"
+    }
+
+    clipboard_read_x11 "${current}" &&
+      [[ ${SPICE_CLIPBOARD_MIME} == text/plain ]] &&
+      [[ ${SPICE_CLIPBOARD_X11_TARGET} == UTF8_STRING ]] &&
+      ((xclip_data_requests == 1)) &&
+      clipboard_write_wayland "${current}" "${SPICE_CLIPBOARD_MIME}" &&
+      cmp -s "${expected}" "${forwarded}"
+    local result=$?
+    rm -rf -- "${test_root}"
+    return "${result}"
+  )
+}
+
+clipboard_duplicate_key_includes_mime() {
+  local test_root current previous previous_mime
+  test_root=$(mktemp -d /tmp/spice-guest-tools-clipboard-duplicate.XXXXXX)
+  current="${test_root}/current"
+  previous="${test_root}/previous"
+  previous_mime="${test_root}/previous.type"
+  printf '%s' 'same bytes' >"${current}"
+  # shellcheck disable=SC1091
+  source "${project_root}/libexec/clipboard.sh"
+  clipboard_remember_item "${current}" image/png "${previous}" "${previous_mime}"
+  clipboard_item_is_duplicate "${current}" image/png "${previous}" "${previous_mime}" &&
+    ! clipboard_item_is_duplicate "${current}" image/jpeg "${previous}" "${previous_mime}"
+  local result=$?
+  rm -rf -- "${test_root}"
+  return "${result}"
 }
 
 config_rejects_display_ownership_settings() {
@@ -393,7 +519,7 @@ bootstrap_is_automatic_and_idempotent() {
   if [[ ! -f ${test_home}/config/spice-guest-tools/config.toml ]] ||
     [[ $(grep -Fc -- '-- BEGIN spice-guest-tools managed mode' \
       "${test_home}/config/hypr/monitors.lua") != 1 ]] ||
-    [[ $(<"${test_home}/state/spice-guest-tools/bootstrap.version") != 0.1.1 ]] ||
+    [[ $(<"${test_home}/state/spice-guest-tools/bootstrap.version") != 0.1.2 ]] ||
     [[ ${backup_count} != 1 ]] ||
     ! cmp -s "${first_result}" "${test_home}/config/hypr/monitors.lua"; then
     rm -rf -- "${test_home}"
@@ -499,6 +625,7 @@ system_package_preserves_user_runtime_boundary() {
     ! grep -Fq 'ConditionPathExists=!%h/.config/spice-guest-tools/disabled' \
       "${test_root}/usr/lib/systemd/user/spice-guest-tools-bootstrap.service" ||
     [[ ! -x ${test_root}/usr/lib/spice-guest-tools/activate-active-users ]] ||
+    [[ ! -f ${test_root}/usr/lib/spice-guest-tools/clipboard.sh ]] ||
     [[ ! -f ${test_root}/usr/lib/spice-guest-tools/backends/omarchy-hyprland.sh ]] ||
     [[ ! -f ${test_root}/usr/share/spice-guest-tools/backends/omarchy-hyprland/managed-monitor.lua ]] ||
     ! grep -Fq '/usr/lib/spice-guest-tools/activate-active-users activate' \
@@ -547,6 +674,10 @@ check "output detection maps a complete virtual layout" output_detection_maps_co
 check "CLI help exposes current commands" cli_has_expected_help
 check "default configuration parses" config_parses
 check "SPICE core is desktop agnostic" core_is_desktop_agnostic
+check "X11 PNG clipboard forwarding is binary-safe" clipboard_forwards_x11_png_binary_safe
+check "Wayland JPEG clipboard forwarding is binary-safe" clipboard_forwards_wayland_jpeg_binary_safe
+check "plain-text clipboard forwarding remains supported" clipboard_preserves_text_fallback
+check "clipboard duplicate suppression includes MIME type" clipboard_duplicate_key_includes_mime
 check "configuration rejects scale and refresh ownership" config_rejects_display_ownership_settings
 check "refresh rate is derived from system state" refresh_rate_comes_from_system_state
 check "modelines support non-60Hz virtual outputs" modeline_generation_supports_non_60hz_outputs

@@ -16,6 +16,9 @@ else
 fi
 # shellcheck disable=SC1090
 source "${common_source}"
+clipboard_source="$(dirname -- "${common_source}")/clipboard.sh"
+# shellcheck disable=SC1090
+source "${clipboard_source}"
 
 load_config
 [[ ${CLIPBOARD_ENABLED} == true ]] || exit 0
@@ -30,14 +33,16 @@ flock -n 9 || exit 0
 work_dir=$(mktemp -d "${base_runtime}/clipboard.XXXXXX")
 events="${work_dir}/events"
 last="${work_dir}/last"
+last_type="${work_dir}/last.type"
 current="${work_dir}/current"
 mkfifo "${events}"
 exec 8<>"${events}"
 : >"${last}"
+: >"${last_type}"
 
 cleanup() {
   jobs -pr | xargs -r kill 2>/dev/null || true
-  rm -f -- "${events}" "${last}" "${current}"
+  rm -f -- "${events}" "${last}" "${last_type}" "${current}"
   rmdir -- "${work_dir}" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -73,17 +78,23 @@ while read -r source_name; do
   active_local_wayland_session_for_user || continue
   case ${source_name} in
     x)
-      if xclip -selection clipboard -out >"${current}" 2>/dev/null &&
-        within_limit "${current}" && ! cmp -s "${current}" "${last}"; then
-        cp "${current}" "${last}"
-        wl-copy --type text/plain <"${current}"
+      if clipboard_read_x11 "${current}" && within_limit "${current}" &&
+        ! clipboard_item_is_duplicate "${current}" "${SPICE_CLIPBOARD_MIME}" \
+          "${last}" "${last_type}"; then
+        if clipboard_write_wayland "${current}" "${SPICE_CLIPBOARD_MIME}"; then
+          clipboard_remember_item "${current}" "${SPICE_CLIPBOARD_MIME}" \
+            "${last}" "${last_type}"
+        fi
       fi
       ;;
     w)
-      if wl-paste --no-newline --type text >"${current}" 2>/dev/null &&
-        within_limit "${current}" && ! cmp -s "${current}" "${last}"; then
-        cp "${current}" "${last}"
-        xclip -selection clipboard -in <"${current}"
+      if clipboard_read_wayland "${current}" && within_limit "${current}" &&
+        ! clipboard_item_is_duplicate "${current}" "${SPICE_CLIPBOARD_MIME}" \
+          "${last}" "${last_type}"; then
+        if clipboard_write_x11 "${current}" "${SPICE_CLIPBOARD_X11_TARGET}"; then
+          clipboard_remember_item "${current}" "${SPICE_CLIPBOARD_MIME}" \
+            "${last}" "${last_type}"
+        fi
       fi
       ;;
   esac

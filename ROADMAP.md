@@ -2,7 +2,7 @@
 
 ## 0.1.0 — First release
 
-- [x] Plain-text SPICE/X11 to Wayland clipboard bridge
+- [x] Plain-text and image SPICE/X11 to Wayland clipboard bridge
 - [x] Immediate SPICE monitor request parser with duplicate suppression
 - [x] Dynamic Hyprland modeline persistence
 - [x] Hypervisor-independent active-output detection

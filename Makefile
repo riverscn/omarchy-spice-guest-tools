@@ -1,6 +1,6 @@
 PREFIX ?= /usr
 DESTDIR ?=
-VERSION := 0.1.1
+VERSION := 0.1.2
 NAME := omarchy-spice-guest-tools
 
 .PHONY: all check install user-install uninstall-user dist
@@ -10,7 +10,7 @@ all: check
 check:
 	./tests/run
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		shellcheck bin/spice-guest-tools libexec/common.sh \
+		shellcheck bin/spice-guest-tools libexec/common.sh libexec/clipboard.sh \
 			libexec/backends/omarchy-hyprland.sh \
 			libexec/activate-active-users libexec/spice-clipboard-bridge \
 			libexec/spice-display-bridge omarchy-spice-guest-tools.install tests/run; \
@@ -23,6 +23,7 @@ install:
 	install -Dm755 libexec/spice-clipboard-bridge "$(DESTDIR)$(PREFIX)/bin/spice-clipboard-bridge"
 	install -Dm755 libexec/spice-display-bridge "$(DESTDIR)$(PREFIX)/bin/spice-display-bridge"
 	install -Dm644 libexec/common.sh "$(DESTDIR)$(PREFIX)/lib/spice-guest-tools/common.sh"
+	install -Dm644 libexec/clipboard.sh "$(DESTDIR)$(PREFIX)/lib/spice-guest-tools/clipboard.sh"
 	install -Dm644 libexec/backends/omarchy-hyprland.sh \
 		"$(DESTDIR)$(PREFIX)/lib/spice-guest-tools/backends/omarchy-hyprland.sh"
 	install -Dm755 libexec/activate-active-users \
@@ -57,6 +58,7 @@ user-install:
 	install -Dm755 libexec/spice-clipboard-bridge "$(HOME)/.local/bin/spice-clipboard-bridge"
 	install -Dm755 libexec/spice-display-bridge "$(HOME)/.local/bin/spice-display-bridge"
 	install -Dm644 libexec/common.sh "$(HOME)/.local/lib/spice-guest-tools/common.sh"
+	install -Dm644 libexec/clipboard.sh "$(HOME)/.local/lib/spice-guest-tools/clipboard.sh"
 	install -Dm644 libexec/backends/omarchy-hyprland.sh \
 		"$(HOME)/.local/lib/spice-guest-tools/backends/omarchy-hyprland.sh"
 	install -Dm644 systemd/user/spice-clipboard-bridge.service \
@@ -88,6 +90,7 @@ uninstall-user:
 	rm -f "$(HOME)/.local/bin/spice-clipboard-bridge"
 	rm -f "$(HOME)/.local/bin/spice-display-bridge"
 	rm -f "$(HOME)/.local/lib/spice-guest-tools/common.sh"
+	rm -f "$(HOME)/.local/lib/spice-guest-tools/clipboard.sh"
 	rm -f "$(HOME)/.local/lib/spice-guest-tools/backends/omarchy-hyprland.sh"
 	rm -f "$(HOME)/.config/systemd/user/spice-clipboard-bridge.service"
 	rm -f "$(HOME)/.config/systemd/user/spice-display-bridge.service"

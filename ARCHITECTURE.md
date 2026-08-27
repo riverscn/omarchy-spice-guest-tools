@@ -8,7 +8,7 @@ integration backends.
 The core owns:
 
 - SPICE monitor transaction parsing and duplicate suppression;
-- SPICE/X11 to Wayland text clipboard bridging;
+- SPICE/X11 to Wayland text and image clipboard bridging;
 - active-seat session ownership;
 - configuration, runtime state, and systemd user-service lifecycle;
 - modeline generation and validation.
