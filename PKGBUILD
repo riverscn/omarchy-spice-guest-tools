@@ -28,8 +28,8 @@ makedepends=(
   'pkgconf'
   'wayland-protocols'
 )
-source=("${pkgname}-${pkgver}.tar.gz")
-sha256sums=('SKIP')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
+sha256sums=('68bfb12fc67786550d9d36556ae685bca839ca19d5eaa2f82fb81dcec4508b0c')
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"
