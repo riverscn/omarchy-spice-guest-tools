@@ -22,7 +22,7 @@ source "${clipboard_source}"
 
 load_config
 [[ ${CLIPBOARD_ENABLED} == true ]] || exit 0
-require_commands flock loginctl clipnotify xclip wl-copy wl-paste cmp stat || exit 1
+require_commands flock loginctl clipnotify xclip spice-clipboard-provider wl-paste cmp stat || exit 1
 
 base_runtime=$(runtime_dir)
 mkdir -p -- "${base_runtime}"

@@ -3,6 +3,7 @@
 ## 0.1.0 — First release
 
 - [x] Plain-text and image SPICE/X11 to Wayland clipboard bridge
+- [x] Preserve original image MIME data with a lazy PNG compatibility offer
 - [x] Immediate SPICE monitor request parser with duplicate suppression
 - [x] Dynamic Hyprland modeline persistence
 - [x] Hypervisor-independent active-output detection

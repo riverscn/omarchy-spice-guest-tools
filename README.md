@@ -21,6 +21,8 @@ and dual-display resizing are tested on a live UTM aarch64 guest.
 ## Components
 
 - `spice-clipboard-bridge`: two-way text and image X11/Wayland clipboard bridge
+- `spice-clipboard-provider`: native multi-MIME Wayland/X11 selection owner
+  with lazy image conversion
 - `spice-display-bridge`: immediate, atomic SPICE monitor-layout translator
 - `spice-guest-tools-bootstrap.service`: idempotent per-user configuration at
   login, implemented by the `spice-guest-tools bootstrap` command
@@ -94,8 +96,8 @@ pacman-managed dependencies, upgrades, integrity checks, or removal. Install
 the development and runtime dependencies explicitly on a fresh Omarchy guest:
 
 ```bash
-omarchy pkg add base-devel clipnotify gawk jq libxcvt lua spice-vdagent \
-  wl-clipboard xclip
+omarchy pkg add base-devel clipnotify gdk-pixbuf2 glib2 gawk gtk3 jq libxcvt \
+  lua pkgconf spice-vdagent wayland wayland-protocols wl-clipboard xclip
 ```
 
 ShellCheck is optional but recommended. On Omarchy aarch64, use the AUR
@@ -151,6 +153,8 @@ output = "auto"
 [clipboard]
 enabled = true
 max_bytes = 104857600
+max_pixels = 67108864
+derived_formats = ["image/png"]
 ```
 
 It currently resolves to `omarchy-hyprland`. An explicit backend name is useful
@@ -158,8 +162,13 @@ when more than one installed backend can handle the active desktop session.
 Set `display.enabled` or `clipboard.enabled` to `false` to disable only that
 bridge. `clipboard.max_bytes` is the maximum accepted text or image clipboard
 item size in bytes; the default is 100 MiB and the accepted range is 1 byte
-through 1 GiB. Image forwarding accepts PNG, JPEG, TIFF, and BMP MIME types and
-preserves their encoded bytes without conversion.
+through 1 GiB. `clipboard.max_pixels` limits decoded images before a derived
+representation is returned; the default is 67,108,864 pixels. Set
+`clipboard.derived_formats` to `[]` to disable compatibility conversion, or
+leave it as `["image/png"]` to advertise PNG for non-PNG raster images. The
+original PNG, JPEG, TIFF, or BMP bytes remain available unchanged. PNG encoding
+is lazy: it occurs only if a consumer requests `image/png`, and the result is
+then cached for the lifetime of that clipboard selection.
 
 When the number of active Hyprland outputs matches the SPICE monitor layout,
 outputs are mapped automatically in Hyprland output order without inspecting
@@ -220,6 +229,9 @@ metadata will be added after the SPICE host-environment test matrix is complete.
 - Clipboard support is limited to plain text and PNG, JPEG, TIFF, or BMP image
   data. File-manager copy/paste and other rich clipboard formats are not
   supported.
+- Native multi-format publication requires a compositor implementing the
+  staging `ext-data-control-v1` protocol. Current supported Omarchy/Hyprland
+  releases provide it.
 - Display requests are currently parsed from `spice-vdagent` 0.23.x debug
   logs; other versions have not yet been validated.
 - Runtime resizing requires Hyprland's Lua `eval` control API.

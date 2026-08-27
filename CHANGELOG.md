@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.3 — 2026-08-28
+
+- Replace single-MIME `wl-copy` publication with an independent native
+  Wayland/X11 clipboard provider built on `ext-data-control-v1` and GTK.
+- Preserve original PNG, JPEG, TIFF, and BMP bytes while advertising a lazy
+  PNG compatibility representation for non-PNG images.
+- Add configurable derived formats and decoded-pixel limits, plus byte and
+  pixel bounds for generated PNG data.
+- Mark provider-owned selections with a private MIME target so X11/Wayland
+  clipboard echoes do not collapse multiple representations back to one.
+
 ## 0.1.2 — 2026-08-27
 
 - Add binary-safe, two-way PNG, JPEG, TIFF, and BMP clipboard forwarding while

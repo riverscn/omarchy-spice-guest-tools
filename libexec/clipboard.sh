@@ -18,6 +18,8 @@ SPICE_CLIPBOARD_TARGETS=(
   'STRING|text/plain|UTF8_STRING'
 )
 
+SPICE_CLIPBOARD_MARKER_MIME=application/x-spice-guest-tools
+
 clipboard_target_is_offered() {
   local offered_targets=$1 wanted=$2 offered
   while IFS= read -r offered; do
@@ -29,6 +31,7 @@ clipboard_target_is_offered() {
 clipboard_read_x11() {
   local destination=$1 descriptor source_target canonical_mime x11_target
   local offered_targets
+  SPICE_CLIPBOARD_OWNED=false
   if ! offered_targets=$(xclip -selection clipboard -target TARGETS -out 2>/dev/null); then
     if xclip -selection clipboard -out >"${destination}" 2>/dev/null; then
       SPICE_CLIPBOARD_MIME=text/plain
@@ -37,6 +40,11 @@ clipboard_read_x11() {
     fi
     return 1
   fi
+  if clipboard_target_is_offered "${offered_targets}" "${SPICE_CLIPBOARD_MARKER_MIME}"; then
+    SPICE_CLIPBOARD_OWNED=true
+    return 1
+  fi
+  SPICE_CLIPBOARD_OWNED=false
   for descriptor in "${SPICE_CLIPBOARD_TARGETS[@]}"; do
     IFS='|' read -r source_target canonical_mime x11_target <<<"${descriptor}"
     if clipboard_target_is_offered "${offered_targets}" "${source_target}" &&
@@ -53,6 +61,7 @@ clipboard_read_x11() {
 clipboard_read_wayland() {
   local destination=$1 descriptor source_target canonical_mime x11_target
   local offered_targets
+  SPICE_CLIPBOARD_OWNED=false
   if ! offered_targets=$(wl-paste --list-types 2>/dev/null); then
     if wl-paste --no-newline --type text >"${destination}" 2>/dev/null; then
       SPICE_CLIPBOARD_MIME=text/plain
@@ -61,6 +70,11 @@ clipboard_read_wayland() {
     fi
     return 1
   fi
+  if clipboard_target_is_offered "${offered_targets}" "${SPICE_CLIPBOARD_MARKER_MIME}"; then
+    SPICE_CLIPBOARD_OWNED=true
+    return 1
+  fi
+  SPICE_CLIPBOARD_OWNED=false
   for descriptor in "${SPICE_CLIPBOARD_TARGETS[@]}"; do
     IFS='|' read -r source_target canonical_mime x11_target <<<"${descriptor}"
     if clipboard_target_is_offered "${offered_targets}" "${source_target}" &&
@@ -76,7 +90,18 @@ clipboard_read_wayland() {
 
 clipboard_write_wayland() {
   local source=$1 mime=$2
-  wl-copy --type "${mime}" <"${source}"
+  local max_bytes=${CLIPBOARD_MAX_BYTES:-104857600}
+  local max_pixels=${CLIPBOARD_MAX_PIXELS:-67108864}
+  local derived_formats=${CLIPBOARD_DERIVED_FORMATS:-image/png}
+  local -a arguments=(
+    --mime "${mime}"
+    --max-bytes "${max_bytes}"
+    --max-pixels "${max_pixels}"
+  )
+  if [[ ,${derived_formats}, == *,image/png,* ]]; then
+    arguments+=(--derive-png)
+  fi
+  spice-clipboard-provider "${arguments[@]}" "${source}"
 }
 
 clipboard_write_x11() {

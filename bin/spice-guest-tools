@@ -2,7 +2,7 @@
 
 set -u
 
-VERSION=0.1.2
+VERSION=0.1.3
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project_root=$(cd -- "${script_dir}/.." && pwd)
 
@@ -113,7 +113,8 @@ cmd_bootstrap() {
 cmd_install() {
   local backend_snapshot state_root
   [[ $# -eq 0 ]] || die "install takes no arguments"
-  require_commands systemctl loginctl spice-vdagent cvt xclip clipnotify wl-copy wl-paste ||
+  require_commands systemctl loginctl spice-vdagent cvt xclip clipnotify \
+    spice-clipboard-provider wl-paste ||
     die "install the missing dependencies first"
   services_are_installed ||
     die "service units are not installed; install the system package or run 'make user-install' for development"
@@ -244,7 +245,8 @@ cmd_doctor() {
   doctor_check "SPICE agent channel" spice_channel_is_available
 
   local command_name
-  for command_name in spice-vdagent loginctl cvt xclip clipnotify wl-copy wl-paste; do
+  for command_name in spice-vdagent loginctl cvt xclip clipnotify \
+    spice-clipboard-provider wl-paste; do
     doctor_check "command: ${command_name}" command -v "${command_name}"
   done
 

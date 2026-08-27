@@ -8,3 +8,5 @@ output = "auto"
 [clipboard]
 enabled = true
 max_bytes = 104857600
+max_pixels = 67108864
+derived_formats = ["image/png"]

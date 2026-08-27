@@ -51,12 +51,25 @@ validate_bool() {
   [[ ${value} == true || ${value} == false ]] || die "${name} must be true or false"
 }
 
+parse_clipboard_derived_formats() {
+  local value compact
+  value=$1
+  compact=${value//[[:space:]]/}
+  case ${compact} in
+    '[]') printf '%s' '' ;;
+    '["image/png"]') printf '%s' 'image/png' ;;
+    *) die 'clipboard.derived_formats must be [] or ["image/png"]' ;;
+  esac
+}
+
 load_config() {
   INTEGRATION_BACKEND=auto
   DISPLAY_ENABLED=true
   DISPLAY_OUTPUT=auto
   CLIPBOARD_ENABLED=true
   CLIPBOARD_MAX_BYTES=104857600
+  CLIPBOARD_MAX_PIXELS=67108864
+  CLIPBOARD_DERIVED_FORMATS=image/png
 
   local file=${SPICE_GUEST_TOOLS_CONFIG:-$(config_path)}
   local section="" line key value setting
@@ -82,6 +95,10 @@ load_config() {
         display.output) DISPLAY_OUTPUT=${value} ;;
         clipboard.enabled) CLIPBOARD_ENABLED=${value} ;;
         clipboard.max_bytes) CLIPBOARD_MAX_BYTES=${value} ;;
+        clipboard.max_pixels) CLIPBOARD_MAX_PIXELS=${value} ;;
+        clipboard.derived_formats)
+          CLIPBOARD_DERIVED_FORMATS=$(parse_clipboard_derived_formats "${value}")
+          ;;
         *) die "unknown config setting: ${setting}" ;;
       esac
     done <"${file}"
@@ -92,6 +109,7 @@ load_config() {
   [[ ${DISPLAY_OUTPUT} == auto || ${DISPLAY_OUTPUT} =~ ^[A-Za-z0-9._-]+$ ]] ||
     die "display.output contains unsupported characters"
   validate_uint clipboard.max_bytes "${CLIPBOARD_MAX_BYTES}" 1 1073741824
+  validate_uint clipboard.max_pixels "${CLIPBOARD_MAX_PIXELS}" 1 268435456
   [[ ${INTEGRATION_BACKEND} == auto ||
     ${INTEGRATION_BACKEND} =~ ^[a-z0-9][a-z0-9-]*$ ]] ||
     die "integration.backend contains unsupported characters"
