@@ -1,5 +1,5 @@
 -- BEGIN spice-guest-tools managed mode
--- SPICE owns virtual output modes and layout. Scale remains owned by Omarchy.
+-- SPICE owns virtual output modes and layout. Scale follows Omarchy.
 do
   local home = os.getenv("HOME")
   local state_home = os.getenv("XDG_STATE_HOME") or (home .. "/.local/state")
@@ -69,6 +69,7 @@ do
           output = output,
           mode = "modeline " .. modeline,
           position = position,
+          scale = omarchy_monitor_scale,
         }
         hl.monitor(config)
       end

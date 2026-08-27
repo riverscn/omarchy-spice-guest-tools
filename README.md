@@ -187,9 +187,10 @@ local omarchy_monitor_scale = 1.5
 
 Keep this setting in `~/.config/hypr/monitors.lua` as usual. The SPICE
 integration reads each output's live scale only to translate physical SPICE
-coordinates into Hyprland's logical coordinate space. Runtime and persisted
-monitor rules omit the scale field entirely, so independently configured
-per-output scales remain unchanged.
+coordinates into Hyprland's logical coordinate space. Runtime monitor updates
+explicitly retain each output's current live scale. Persisted SPICE rules use
+`omarchy_monitor_scale`, so Hyprland does not fall back to scale 1 after a
+restart and changes made through Omarchy's display settings continue to apply.
 
 ## Uninstall
 

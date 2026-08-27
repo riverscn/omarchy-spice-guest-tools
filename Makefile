@@ -1,6 +1,6 @@
 PREFIX ?= /usr
 DESTDIR ?=
-VERSION := 0.1.0
+VERSION := 0.1.1
 NAME := omarchy-spice-guest-tools
 
 .PHONY: all check install user-install uninstall-user dist

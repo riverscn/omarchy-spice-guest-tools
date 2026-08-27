@@ -296,8 +296,9 @@ backend_apply_monitor_layout() {
       "${monitor_index}" "${output}" "${modeline}" "${logical_x}" "${logical_y}" \
       >>"${resolved_file}"
     printf -v lua_command \
-      '%shl.monitor({ output = "%s", mode = "modeline %s", position = "%sx%s" }); ' \
-      "${lua_command}" "${output}" "${modeline}" "${logical_x}" "${logical_y}"
+      '%shl.monitor({ output = "%s", mode = "modeline %s", position = "%sx%s", scale = %s }); ' \
+      "${lua_command}" "${output}" "${modeline}" "${logical_x}" "${logical_y}" \
+      "${monitor_scale}"
 
     previous_raw_x=${raw_x}
     previous_raw_y=${raw_y}

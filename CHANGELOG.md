@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-08-27
+
+- Keep each output's current scale during live SPICE layout updates.
+- Make persisted SPICE monitor rules follow `omarchy_monitor_scale`, preventing
+  Hyprland from defaulting omitted scales to 1 after a restart.
+
 ## 0.1.0 — 2026-08-25
 
 - Add two-way plain-text clipboard sharing between SPICE/X11 and Wayland.
