@@ -1,7 +1,7 @@
 pkgbase = omarchy-spice-guest-tools
 	pkgdesc = System-packaged, per-user SPICE integration for Omarchy
 	pkgver = 0.1.4
-	pkgrel = 0.1
+	pkgrel = 1
 	url = https://github.com/riverscn/omarchy-spice-guest-tools
 	install = omarchy-spice-guest-tools.install
 	arch = aarch64
@@ -25,7 +25,7 @@ pkgbase = omarchy-spice-guest-tools
 	depends = wayland
 	depends = wl-clipboard
 	depends = xclip
-	source = omarchy-spice-guest-tools-0.1.4.tar.gz
-	sha256sums = SKIP
+	source = omarchy-spice-guest-tools-0.1.4.tar.gz::https://github.com/riverscn/omarchy-spice-guest-tools/releases/download/v0.1.4/omarchy-spice-guest-tools-0.1.4.tar.gz
+	sha256sums = 073840c82d53740b13c47cf35a6a7e4992b06ad352c277ef0617d0b9597becf3
 
 pkgname = omarchy-spice-guest-tools
