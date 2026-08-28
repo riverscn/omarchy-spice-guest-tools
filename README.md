@@ -21,8 +21,8 @@ and dual-display resizing are tested on a live UTM aarch64 guest.
 ## Components
 
 - `spice-clipboard-bridge`: two-way text and image X11/Wayland clipboard bridge
-- `spice-clipboard-provider`: native multi-MIME Wayland/X11 selection owner
-  with lazy image conversion
+- `spice-clipboard-provider`: native multi-MIME selection owner with lazy image
+  conversion and an isolated Wayland-only mode for SPICE ingress
 - `spice-display-bridge`: immediate, atomic SPICE monitor-layout translator
 - `spice-guest-tools-bootstrap.service`: idempotent per-user configuration at
   login, implemented by the `spice-guest-tools bootstrap` command
@@ -169,6 +169,12 @@ leave it as `["image/png"]` to advertise PNG for non-PNG raster images. The
 original PNG, JPEG, TIFF, or BMP bytes remain available unchanged. PNG encoding
 is lazy: it occurs only if a consumer requests `image/png`, and the result is
 then cached for the lifetime of that clipboard selection.
+
+For clipboard items arriving from the SPICE X11 agent, the bridge deliberately
+leaves the X11 selection under `spice-vdagent` ownership and publishes the
+multi-format representation only to Wayland. Replacing both selections would
+make the agent report the guest-side publication back to the host, which can
+echo the same item into the guest and cancel the Wayland provider.
 
 When the number of active Hyprland outputs matches the SPICE monitor layout,
 outputs are mapped automatically in Hyprland output order without inspecting

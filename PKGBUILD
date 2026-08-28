@@ -1,6 +1,6 @@
 pkgname=omarchy-spice-guest-tools
-pkgver=0.1.3
-pkgrel=1
+pkgver=0.1.4
+pkgrel=0.1
 pkgdesc='System-packaged, per-user SPICE integration for Omarchy'
 url='https://github.com/riverscn/omarchy-spice-guest-tools'
 arch=('aarch64' 'x86_64')
@@ -28,8 +28,8 @@ makedepends=(
   'pkgconf'
   'wayland-protocols'
 )
-source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/${pkgname}-${pkgver}.tar.gz")
-sha256sums=('68bfb12fc67786550d9d36556ae685bca839ca19d5eaa2f82fb81dcec4508b0c')
+source=("${pkgname}-${pkgver}.tar.gz")
+sha256sums=('SKIP')
 
 build() {
   cd "${srcdir}/${pkgname}-${pkgver}"

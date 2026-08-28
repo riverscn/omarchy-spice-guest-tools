@@ -9,8 +9,8 @@ The core owns:
 
 - SPICE monitor transaction parsing and duplicate suppression;
 - SPICE/X11 to Wayland text and image clipboard bridging;
-- multi-representation Wayland/X11 clipboard ownership through
-  `ext-data-control-v1` and GTK, including lazy derived image formats;
+- multi-representation clipboard ownership through `ext-data-control-v1` and
+  GTK, including isolated Wayland publication and lazy derived image formats;
 - active-seat session ownership;
 - configuration, runtime state, and systemd user-service lifecycle;
 - modeline generation and validation.
@@ -56,15 +56,17 @@ changes to SPICE parsing or clipboard code.
 The distribution `spice-vdagent` remains the SPICE transport and initially
 presents host clipboard data through X11. `spice-clipboard-bridge` reads that
 selection and hands each logical item to the native
-`spice-clipboard-provider`. The provider then owns both the Wayland and X11
-selections, preserves the original encoded bytes, advertises every
+`spice-clipboard-provider`. In this ingress path the provider owns only the
+Wayland selection: `spice-vdagent` remains the X11 owner, so the guest-side
+publication is not reflected to the host and echoed back as a new selection.
+The provider preserves the original encoded bytes, advertises every
 representation it can serve, and generates a configured PNG compatibility
-representation only when a consumer requests it. GTK handles the X11 selection
-protocol, including `TARGETS`, `MULTIPLE`, and incremental transfers; the
-Wayland side uses `ext-data-control-v1` directly.
+representation only when a consumer requests it. Its standalone mode can also
+own X11 through GTK, including `TARGETS`, `MULTIPLE`, and incremental
+transfers; the Wayland side uses `ext-data-control-v1` directly.
 
-The private `application/x-spice-guest-tools` target identifies selections
-owned by the provider, so the bridge ignores compositor and XWayland echoes
+The private `application/x-spice-guest-tools` target identifies Wayland
+selections owned by the provider, so the bridge ignores compositor echoes
 without comparing different encodings of the same pixels. The provider uses
 the public staging `ext-data-control-v1` protocol rather than vd_agent internals
 or compositor-specific APIs.

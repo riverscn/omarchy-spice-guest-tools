@@ -27,6 +27,7 @@ typedef struct {
     gboolean derive_png;
     gboolean foreground;
     gboolean print_types;
+    gboolean wayland_only;
 } Options;
 
 typedef struct {
@@ -40,6 +41,7 @@ typedef struct {
     struct ext_data_control_offer_v1 *primary_offer;
     GtkClipboard *x11_clipboard;
     SpiceClipboardContent *content;
+    gboolean own_x11;
     gboolean running;
 } Provider;
 
@@ -55,13 +57,14 @@ static void usage(FILE *stream)
     fprintf(stream,
             "Usage: spice-clipboard-provider --mime MIME [options] FILE\n"
             "\n"
-            "Own the Wayland and X11 clipboards and serve one logical item in multiple MIME types.\n"
+            "Own clipboard selections and serve one logical item in multiple MIME types.\n"
             "\n"
             "Options:\n"
             "  --mime MIME          Original clipboard MIME type (required)\n"
             "  --derive-png         Offer a lazily generated image/png fallback\n"
             "  --max-bytes N        Maximum source and derived size (default: %llu)\n"
             "  --max-pixels N       Maximum decoded image pixel count (default: %llu)\n"
+            "  --wayland-only       Own Wayland without replacing the X11 selection\n"
             "  --foreground         Do not fork after acquiring the clipboard\n"
             "  --print-types        Print MIME types that would be offered and exit\n"
             "  -h, --help           Show this help\n",
@@ -101,6 +104,8 @@ static gboolean parse_options(int argc, char **argv, Options *options)
             }
         } else if (g_strcmp0(argv[i], "--derive-png") == 0) {
             options->derive_png = TRUE;
+        } else if (g_strcmp0(argv[i], "--wayland-only") == 0) {
+            options->wayland_only = TRUE;
         } else if (g_strcmp0(argv[i], "--foreground") == 0) {
             options->foreground = TRUE;
         } else if (g_strcmp0(argv[i], "--print-types") == 0) {
@@ -429,7 +434,7 @@ static gboolean provider_setup(Provider *provider)
     ext_data_control_device_v1_set_selection(provider->device, provider->source);
     if (wl_display_flush(provider->display) < 0)
         return FALSE;
-    if (!provider_setup_x11(provider))
+    if (provider->own_x11 && !provider_setup_x11(provider))
         return FALSE;
     while (g_main_context_iteration(NULL, FALSE))
         ;
@@ -440,10 +445,13 @@ static gboolean provider_setup(Provider *provider)
     return TRUE;
 }
 
-static int provider_run(SpiceClipboardContent *content, int ready_fd)
+static int provider_run(SpiceClipboardContent *content,
+                        gboolean own_x11,
+                        int ready_fd)
 {
     Provider provider = {
         .content = content,
+        .own_x11 = own_x11,
     };
     char ready = '0';
     int result = EXIT_FAILURE;
@@ -522,7 +530,7 @@ static void install_signal_handlers(void)
     signal(SIGPIPE, SIG_IGN);
 }
 
-static int run_background(SpiceClipboardContent *content)
+static int run_background(SpiceClipboardContent *content, gboolean own_x11)
 {
     int ready_pipe[2];
     pid_t child;
@@ -546,7 +554,7 @@ static int run_background(SpiceClipboardContent *content)
 
         close(ready_pipe[0]);
         (void)setsid();
-        result = provider_run(content, ready_pipe[1]);
+        result = provider_run(content, own_x11, ready_pipe[1]);
         spice_clipboard_content_free(content);
         _exit(result);
     }
@@ -594,11 +602,11 @@ int main(int argc, char **argv)
 
     install_signal_handlers();
     if (options.foreground) {
-        result = provider_run(content, -1);
+        result = provider_run(content, !options.wayland_only, -1);
         spice_clipboard_content_free(content);
         return result;
     }
-    result = run_background(content);
+    result = run_background(content, !options.wayland_only);
     spice_clipboard_content_free(content);
     return result;
 }

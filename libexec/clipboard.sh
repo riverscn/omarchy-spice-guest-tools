@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# This library exports clipboard state to the bridge that sources it.
+# shellcheck disable=SC2034
+
 # Probe richer formats first so copying an image from an application that also
 # offers a textual fallback preserves the image. Each entry is:
 # source target | canonical Wayland MIME | X11 target used when forwarding.
@@ -94,6 +97,7 @@ clipboard_write_wayland() {
   local max_pixels=${CLIPBOARD_MAX_PIXELS:-67108864}
   local derived_formats=${CLIPBOARD_DERIVED_FORMATS:-image/png}
   local -a arguments=(
+    --wayland-only
     --mime "${mime}"
     --max-bytes "${max_bytes}"
     --max-pixels "${max_pixels}"

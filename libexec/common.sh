@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# This file is sourced by the service entry points, which consume the settings
+# assigned by load_config.
+# shellcheck disable=SC2034
+
 SPICE_GUEST_TOOLS_NAME="spice-guest-tools"
 
 log() {

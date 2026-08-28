@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4 — 2026-08-28
+
+- Publish SPICE/X11 clipboard items to Wayland without replacing the X11
+  selection, preventing `spice-vdagent` and the host from reflecting the same
+  item back and cancelling the multi-format provider.
+
 ## 0.1.3 — 2026-08-28
 
 - Replace single-MIME `wl-copy` publication with an independent native
